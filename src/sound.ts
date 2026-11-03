@@ -1,4 +1,6 @@
-// Generate short, gentle cues locally; no audio downloads or autoplay on page load.
+import { voiceClipsFor } from './voice.ts';
+
+// Gentle tonal cues plus pre-generated Gemini narration; never autoplay on page load.
 let context: AudioContext | null = null;
 export function playFeedback(correct: boolean): void {
   try {
@@ -29,19 +31,53 @@ export function playFeedback(correct: boolean): void {
   } catch { /* Sound availability must never interrupt a child's practice. */ }
 }
 
+// Decode clips lazily, then schedule them together to avoid gaps and mobile autoplay races.
+const buffers = new Map<string, Promise<AudioBuffer>>();
+const narration = new Set<AudioBufferSourceNode>();
+let speechRequest = 0;
 export function stopSpeech(): void {
-  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  speechRequest++;
+  for (const source of narration) {
+    try { source.stop(); } catch { /* Already ended. */ }
+    source.disconnect();
+  }
+  narration.clear();
 }
 export function speak(text: string): void {
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  stopSpeech();
+  const request = speechRequest;
+  const clips = voiceClipsFor(text);
+  if (!clips.length) return;
   try {
-    stopSpeech();
-    const message = new SpeechSynthesisUtterance(text);
-    message.lang = 'zh-CN';
-    message.rate = .8;
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('zh'));
-    const voice = voices.find(v => v.localService) || voices[0];
-    if (voice) message.voice = voice;
-    window.speechSynthesis.speak(message);
-  } catch { /* The picture tools remain usable without system speech. */ }
+    const Audio = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Audio) return;
+    context ??= new Audio();
+    const active = context;
+    // Resume synchronously from the click/key gesture, before loading any files.
+    const resume = active.state === 'suspended' ? active.resume() : Promise.resolve();
+    const decoded = clips.map(clip => {
+      let buffer = buffers.get(clip);
+      if (!buffer) {
+        buffer = fetch(`${import.meta.env?.BASE_URL || './'}audio/gemini/${clip}.wav`)
+          .then(response => { if (!response.ok) throw new Error('Voice clip unavailable'); return response.arrayBuffer(); })
+          .then(data => active.decodeAudioData(data))
+          .catch(error => { buffers.delete(clip); throw error; });
+        buffers.set(clip, buffer);
+      }
+      return buffer;
+    });
+    void Promise.all([resume, Promise.all(decoded)]).then(([, loaded]) => {
+      if (request !== speechRequest || active.state !== 'running') return;
+      let at = active.currentTime + .02;
+      for (const buffer of loaded) {
+        const source = active.createBufferSource();
+        source.buffer = buffer;
+        source.connect(active.destination);
+        narration.add(source);
+        source.onended = () => { narration.delete(source); source.disconnect(); };
+        source.start(at);
+        at += buffer.duration + .035;
+      }
+    }).catch(() => { /* Picture feedback always works, including if audio is unavailable. */ });
+  } catch { /* Older browsers can continue using the picture tools silently. */ }
 }

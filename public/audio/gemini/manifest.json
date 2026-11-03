@@ -1,0 +1,145 @@
+{
+  "model": "gemini-3.8-flash-tts",
+  "voice": "Sulafat",
+  "style": "温柔、明亮、自然的成年女性普通话声音，像耐心陪六岁孩子玩数学的小兔老师。清晰咬字，语速稍慢，音量柔和，不过度夸张。不添加任何文字或声音。短词和数字也保持同一温暖音色。",
+  "clips": {
+    "number-0": {
+      "text": "零",
+      "file": "number-0.wav"
+    },
+    "number-1": {
+      "text": "一",
+      "file": "number-1.wav"
+    },
+    "number-2": {
+      "text": "二",
+      "file": "number-2.wav"
+    },
+    "number-3": {
+      "text": "三",
+      "file": "number-3.wav"
+    },
+    "number-4": {
+      "text": "四",
+      "file": "number-4.wav"
+    },
+    "number-5": {
+      "text": "五",
+      "file": "number-5.wav"
+    },
+    "number-6": {
+      "text": "六",
+      "file": "number-6.wav"
+    },
+    "number-7": {
+      "text": "七",
+      "file": "number-7.wav"
+    },
+    "number-8": {
+      "text": "八",
+      "file": "number-8.wav"
+    },
+    "number-9": {
+      "text": "九",
+      "file": "number-9.wav"
+    },
+    "number-10": {
+      "text": "十",
+      "file": "number-10.wav"
+    },
+    "number-11": {
+      "text": "十一",
+      "file": "number-11.wav"
+    },
+    "number-12": {
+      "text": "十二",
+      "file": "number-12.wav"
+    },
+    "number-13": {
+      "text": "十三",
+      "file": "number-13.wav"
+    },
+    "number-14": {
+      "text": "十四",
+      "file": "number-14.wav"
+    },
+    "number-15": {
+      "text": "十五",
+      "file": "number-15.wav"
+    },
+    "number-16": {
+      "text": "十六",
+      "file": "number-16.wav"
+    },
+    "number-17": {
+      "text": "十七",
+      "file": "number-17.wav"
+    },
+    "number-18": {
+      "text": "十八",
+      "file": "number-18.wav"
+    },
+    "number-19": {
+      "text": "十九",
+      "file": "number-19.wav"
+    },
+    "number-20": {
+      "text": "二十",
+      "file": "number-20.wav"
+    },
+    "correct": {
+      "text": "真棒！",
+      "file": "correct.wav"
+    },
+    "retry": {
+      "text": "再试试。",
+      "file": "retry.wav"
+    },
+    "celebrate": {
+      "text": "小花园长大啦！",
+      "file": "celebrate.wav",
+      "extra_style": "清楚地读出“小花园”三个字，园字必须清晰完整，保持慢速。"
+    },
+    "hint-empty": {
+      "text": "看看空篮子，想一想，再回去填答案。",
+      "file": "hint-empty.wav"
+    },
+    "hint-combine": {
+      "text": "把两篮草莓合在一起，再点一点，数一数。",
+      "file": "hint-combine.wav"
+    },
+    "hint-count": {
+      "text": "点一点，数一数。想好了，再回去填答案。",
+      "file": "hint-count.wav"
+    },
+    "plus": {
+      "text": "加",
+      "file": "plus.wav"
+    },
+    "minus": {
+      "text": "减",
+      "file": "minus.wav"
+    },
+    "question": {
+      "text": "等于多少？",
+      "file": "question.wav"
+    },
+    "take-first": {
+      "text": "先拿走",
+      "file": "take-first.wav"
+    },
+    "taken": {
+      "text": "拿走",
+      "file": "taken.wav"
+    },
+    "pieces": {
+      "text": "颗",
+      "file": "pieces.wav"
+    },
+    "strawberries": {
+      "text": "颗草莓",
+      "file": "strawberries.wav",
+      "extra_style": "这是语音拼接的末尾片段，前面的数量已经单独录好。严格只发出“颗、草、莓”这三个字的声音，不要在开头加入任何数量词，片段不需要成为完整句子。"
+    }
+  }
+}
