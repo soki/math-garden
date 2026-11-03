@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generate, LEVELS, choices, DEFAULT_SETTINGS, isSettings } from '../src/questions.ts';
-import { createSession, submit, next, summary, isSession } from '../src/session.ts';
+import { createSession, submit, next, skip, summary, isSession, restoreSession } from '../src/session.ts';
 
 function rng(seed: number) { return () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }; }
 for (const level of LEVELS) for (const operation of ['mixed', 'add', 'subtract'] as const) for (const count of [15,20] as const) {
@@ -48,11 +48,13 @@ test('retry success stays separate from first-correct; help is recorded', () => 
   submit(s, 5); assert.equal(s.records[0].status, 'correct'); next(s);
   const stats = summary(s); assert.equal(stats.firstCorrect, 0); assert.equal(stats.retried, 1); assert.equal(stats.helped, 1); assert.equal(stats.review.length, 1);
 });
-test('two wrong attempts reveal answer, and zero is a valid answer', () => {
+test('repeated mistakes never reveal an answer or end the question; zero can still succeed', () => {
   const s = createSession(DEFAULT_SETTINGS, [{ a: 0, b: 0, op: '+', answer: 0 }]);
   assert.equal(submit(s, NaN), false); assert.equal(submit(s, -1), false);
-  submit(s, 1); submit(s, 2); assert.equal(s.records[0].status, 'revealed');
-  assert.equal(submit(s, 0), false); next(s); assert.equal(s.completed, true);
+  for (let i = 0; i < 6; i++) { submit(s, 1); assert.equal(s.records[0].status, 'retry'); }
+  next(s); assert.equal(s.completed, false);
+  assert.equal(submit(s, 0), true); assert.equal(s.records[0].status, 'correct');
+  next(s); assert.equal(s.completed, true); assert.equal(summary(s).firstCorrect, 0);
 });
 test('local save survives JSON roundtrip and rejects malformed records', () => {
   const s = createSession(DEFAULT_SETTINGS, generate(DEFAULT_SETTINGS).questions);
@@ -81,4 +83,30 @@ test('automatic judging accepts zero immediately and rejects wrong digits and wr
   assert.equal(assessEntry('3', 12), 'wrong');
   assert.equal(assessEntry('11', 12), 'wrong');
   assert.equal(assessEntry('0', 12), 'wrong');
+});
+
+test('independent, assisted and skipped outcomes remain distinct', () => {
+  const s = createSession(DEFAULT_SETTINGS, [
+    { a: 2, b: 3, op: '+', answer: 5 }, { a: 3, b: 1, op: '−', answer: 2 }, { a: 4, b: 4, op: '−', answer: 0 },
+  ]);
+  submit(s, 4); submit(s, 5); next(s);
+  s.records[1].helped = true; submit(s, 2); next(s);
+  skip(s);
+  const stats = summary(s);
+  assert.equal(stats.independent, 1); assert.equal(stats.withHelp, 1); assert.equal(stats.skipped, 1);
+  assert.equal(stats.solved, 2); assert.equal(stats.firstCorrect, 1); assert.equal(s.completed, true);
+  assert.equal(submit(s, 0), false);
+});
+test('skipping a fresh question does not fabricate a first answer', () => {
+  const s = createSession(DEFAULT_SETTINGS, [{ a: 1, b: 1, op: '+', answer: 2 }]);
+  assert.equal(summary(s).review.length, 0);
+  skip(s); assert.equal(s.records[0].firstAnswer, null); assert.equal(s.records[0].attempts, 0);
+  assert.equal(summary(s).firstCorrect, 0); assert.equal(summary(s).review.length, 1);
+});
+test('previously revealed saves restore as skipped, never as child success', () => {
+  const s = createSession(DEFAULT_SETTINGS, [{ a: 2, b: 2, op: '+', answer: 4 }]);
+  const legacy = JSON.parse(JSON.stringify(s)); legacy.records[0].status = 'revealed'; legacy.records[0].attempts = 2; legacy.records[0].firstAnswer = 3;
+  const restored = restoreSession(legacy)!;
+  assert.ok(restored); assert.equal(restored.records[0].status, 'skipped'); assert.equal(restored.completed, true);
+  assert.equal(summary(restored).solved, 0);
 });

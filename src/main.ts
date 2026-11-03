@@ -1,8 +1,10 @@
 import './style.css';
-import { playFeedback } from './sound.ts';
+import { playFeedback, speak, stopSpeech } from './sound.ts';
 import { icon, gardenArt } from './art.ts';
 import { choices, DEFAULT_SETTINGS, generate, isSettings, LEVELS, type Question, type Settings } from './questions.ts';
-import { createSession, isSession, next, submit, summary, assessEntry, type Session } from './session.ts';
+import { createSession, restoreSession, next, skip, submit, summary, assessEntry, type Session } from './session.ts';
+
+import { createHint, hintStage, touchFruit } from './hints.ts';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let settings = { ...DEFAULT_SETTINGS };
@@ -17,7 +19,7 @@ let printReturn: 'home' | 'quiz' | 'results' = 'home';
 try {
   const saved = JSON.parse(localStorage.getItem('math-garden-v1') || 'null');
   if (isSettings(saved?.settings)) settings = saved.settings;
-  if (isSession(saved?.session)) session = saved.session;
+  session = restoreSession(saved?.session);
   if (typeof saved?.soundEnabled === 'boolean') soundEnabled = saved.soundEnabled;
 } catch { /* A damaged or unavailable local save must not prevent practice. */ }
 function persist() {
@@ -43,25 +45,30 @@ function home() {
   <div class="practice-options"><fieldset><legend>练什么</legend><div class="segments">${radio('operation', 'mixed', '＋ − 混合', settings.operation === 'mixed')}${radio('operation', 'add', '＋ 加法', settings.operation === 'add')}${radio('operation', 'subtract', '− 减法', settings.operation === 'subtract')}</div></fieldset><fieldset><legend>练几题</legend><div class="segments">${radio('count', 15, '15 题', settings.count === 15)}${radio('count', 20, '20 题', settings.count === 20)}</div></fieldset><fieldset><legend>怎么回答</legend><div class="segments">${radio('input', 'keypad', '数字键盘', settings.input === 'keypad')}${radio('input', 'choices', '选一选', settings.input === 'choices')}</div></fieldset></div>
   <div class="setup-bottom"><p>${icon('flower')} 每轮都是新题目，让小小的进步开花。</p><div class="setup-actions"><button class="button secondary" data-action="print-new">${icon('print')}打印练习纸</button><button class="button primary" data-action="start">开始练习 ${icon('arrow')}</button></div></div></section><p class="home-undertext">不用登录 · 安心练习 · 进度保存在这台设备上</p>${storageUnavailable ? '<p class="save-warning">此浏览器暂不能保存进度，仍可正常练习。</p>' : ''}</main>${footer()}`;
 }
+function feedbackMarkup(correct: boolean, wrong: boolean, pending = false) {
+  const label = correct ? '答对了' : wrong ? '再想一想，可以继续尝试' : pending ? '继续输入下一位数字' : '输入或点选答案';
+  return `<span class="feedback-face" aria-hidden="true">${correct ? '😊' : wrong ? '🤔' : '🐰'}</span><span class="feedback-mark" aria-hidden="true">${correct ? '✓' : wrong ? '↻' : pending ? '…' : '✎'}</span><span class="feedback-caption">${correct ? '真棒！' : wrong ? '再试试' : pending ? '接着填' : '试一试'}</span><span class="sr-only">${label}</span>`;
+}
 function quiz() {
   const s = session!; const r = s.records[s.index]; const q = r.question;
-  const finished = r.status === 'correct' || r.status === 'revealed';
+  const finished = r.status === 'correct';
   const wrong = r.status === 'retry' && (!entry || assessEntry(entry, q.answer) === 'wrong');
-  const max = level(s.settings).max;
-  if (!r.options.length) { r.options = choices(q, max); persist(); }
-  const blooms = s.records.slice(0, s.index).map(() => icon('flower')).join('');
-  return `${header()}<main class="quiz-main"><div class="practice-top"><button class="text-button" data-action="pause">${icon('back')}休息一下</button><div class="practice-meta"><strong>${level(s.settings).name} · ${operationLabel(s.settings)}</strong><span>第 ${s.index + 1} / ${s.records.length} 题</span></div><button class="text-button" data-action="print-current">${icon('print')}打印本轮</button></div><div class="progress-track" role="progressbar" aria-label="练习进度" aria-valuemin="0" aria-valuemax="${s.records.length}" aria-valuenow="${s.index}"><span style="width:${s.index / s.records.length * 100}%"></span></div>
-  ${s.notice ? `<p class="pool-notice">${s.notice}</p>` : ''}
-  <div class="quiz-layout"><section class="question-card ${wrong ? 'incorrect' : ''}" aria-labelledby="question-heading"><p class="eyebrow">${r.status === 'retry' ? '小花不着急，再想一想' : '给小花浇一滴水吧'}</p><h1 id="question-heading" class="sr-only">${q.a} ${q.op === '+' ? '加' : '减'} ${q.b} 等于多少</h1><div class="equation" aria-hidden="true"><span>${q.a}</span><span class="math-op">${q.op}</span><span>${q.b}</span><span class="math-op">=</span><output id="answer-display" class="answer-box ${finished ? 'settled' : ''} ${wrong && !finished ? 'incorrect' : ''}">${finished ? q.answer : entry || '?'}</output></div><p id="answer-spoken" class="sr-only" aria-live="polite">${finished ? `正确答案是${q.answer}` : entry ? `已输入${entry}` : '请作答'}</p>
-  <div class="answer-feedback ${r.status} ${wrong ? 'incorrect' : ''}" role="status">${r.status === 'correct' ? `${icon('check')} ${r.attempts === 1 ? '答对啦！小花又长大一点。' : '你找到答案啦！继续加油。'}` : r.status === 'retry' ? wrong ? '✕ 还不对哦，再试一次吧！' : '再输入一位数字，慢慢来。' : r.status === 'revealed' ? `正确答案是 ${q.answer}，一起看看怎么数吧。` : entry ? '再输入一位数字，慢慢来。' : '输入答案，就会自动判断哦。'}</div>
-  <button class="help-button" data-action="help">${icon('help')}帮帮我 · 看图数一数</button><div class="little-garden" aria-label="已完成的小花">${blooms || `<span>${icon('seed')} 你的第一朵小花，马上就要发芽啦</span>`}</div></section>
-  <section class="input-card" aria-label="作答区域"><p class="input-title">${finished ? '每一次尝试，都很棒' : s.settings.input === 'keypad' ? '点数字，填答案' : '选一个答案吧'}</p>${finished ? `<div class="reward-flower">${icon(r.status === 'correct' ? 'flower' : 'sprout')}<p>${r.status === 'correct' ? '收到一滴成长的水！' : '学会新方法，也是一种成长。'}</p></div>` : s.settings.input === 'keypad' ? `<div class="keypad">${[1,2,3,4,5,6,7,8,9,'clear',0,'delete'].map(n => `<button data-action="key" data-value="${n}" class="key ${typeof n === 'string' ? 'utility-key' : ''}" aria-label="${n === 'clear' ? '清空答案' : n === 'delete' ? '删除一位' : n}">${n === 'clear' ? '清空' : n === 'delete' ? '⌫' : n}</button>`).join('')}</div>` : `<div class="answer-choices">${r.options.map((n, i) => `<button class="choice ${entry === String(n) ? wrong ? 'wrong-choice' : 'chosen' : ''}" data-action="choose" data-value="${n}" aria-pressed="${entry === String(n)}"><small>${i + 1}</small>${n}<span>${entry === String(n) ? wrong ? '✕' : '✓' : ''}</span></button>`).join('')}</div>`}
-  ${finished ? `<button class="button primary check-button" data-action="next">${s.index === s.records.length - 1 ? '看看我的小花园' : '下一题'} ${icon('arrow')}</button>` : ''}<p class="keyboard-note">${finished ? '准备好了再继续，不用着急' : s.settings.input === 'keypad' ? '自动判断 · 也可以用键盘数字输入' : '点选答案，就会自动判断哦'}</p></section></div></main>${footer()}`;
+  if (!r.options.length) { r.options = choices(q, level(s.settings).max); persist(); }
+  const blooms = s.records.slice(0, s.index).filter(r => r.status === 'correct').map(() => icon('flower')).join('');
+  return `${header()}<main class="quiz-main child-quiz"><div class="practice-top"><button class="picture-button" data-action="pause" aria-label="休息一下"><span aria-hidden="true">⏸</span><small>休息</small></button><div class="practice-meta"><span class="sr-only">练习进度</span><strong>${s.index + 1} / ${s.records.length}</strong></div><button class="picture-button" data-action="read-question" aria-label="读题"><span aria-hidden="true">🔊</span><small>听题</small></button></div><div class="progress-track" role="progressbar" aria-label="练习进度" aria-valuemin="0" aria-valuemax="${s.records.length}" aria-valuenow="${s.index}"><span style="width:${s.index / s.records.length * 100}%"></span></div>
+  <div class="quiz-layout"><section class="question-card ${wrong ? 'incorrect' : ''}" aria-labelledby="question-heading"><h1 id="question-heading" class="sr-only">${q.a} ${q.op === '+' ? '加' : '减'} ${q.b} 等于多少</h1><div class="equation" aria-hidden="true"><span>${q.a}</span><span class="math-op">${q.op}</span><span>${q.b}</span><span class="math-op">=</span><output id="answer-display" class="answer-box ${finished ? 'settled' : ''} ${wrong ? 'incorrect' : ''}">${finished ? q.answer : entry || '?'}</output></div><p id="answer-spoken" class="sr-only" aria-live="polite">${finished ? '答对了' : entry ? `已输入${entry}` : '请作答'}</p>
+  <div class="answer-feedback child-feedback ${finished ? 'correct' : wrong ? 'incorrect' : 'answering'}" role="status">${feedbackMarkup(finished, wrong, !!entry && !wrong && !finished)}</div>
+  ${!finished ? `<div class="child-tools"><button class="help-button rabbit-help ${r.attempts >= 2 ? 'needs-help' : ''}" data-action="help" aria-label="小兔帮忙，动手数一数"><span aria-hidden="true">🐰 🧺</span><small>帮帮我</small></button><button class="picture-button skip-button" data-action="skip" aria-label="跳过这道题"><span aria-hidden="true">⏭</span><small>先跳过</small></button></div>` : ''}<div class="little-garden" aria-label="已完成的小花">${blooms || icon('seed')}</div></section>
+  <section class="input-card" aria-label="作答区域">${finished ? `<div class="reward-flower">${icon('flower')}<span class="reward-emoji" aria-hidden="true">💧 ✨</span></div>` : s.settings.input === 'keypad' ? `<div class="keypad">${[1,2,3,4,5,6,7,8,9,'clear',0,'delete'].map(n => `<button data-action="key" data-value="${n}" class="key ${typeof n === 'string' ? 'utility-key' : ''}" aria-label="${n === 'clear' ? '清空答案' : n === 'delete' ? '删除一位' : n}">${n === 'clear' ? '↺' : n === 'delete' ? '⌫' : n}</button>`).join('')}</div>` : `<div class="answer-choices">${r.options.map(n => `<button class="choice ${entry === String(n) && wrong ? 'wrong-choice' : ''}" data-action="choose" data-value="${n}" aria-label="答案 ${n}"><span>${n}</span><small aria-hidden="true">${entry === String(n) && wrong ? '↻' : ''}</small></button>`).join('')}</div>`}
+  ${finished ? `<button class="button primary check-button picture-next" data-action="next" aria-label="${s.index === s.records.length - 1 ? '看看我的小花园' : '下一题'}"><span aria-hidden="true">${s.index === s.records.length - 1 ? '🌸' : '➜'}</span><small>${s.index === s.records.length - 1 ? '小花园' : '下一题'}</small></button>` : ''}</section></div></main>`;
 }
 function results() {
-  const s = session!; const stats = summary(s);
-  return `${header()}<main class="results-main"><p class="eyebrow">A LITTLE GROWTH, A LOT OF JOY</p><div class="result-bouquet">${icon('sprout')}${icon('flower')}${icon('flower')}${icon('sprout')}</div><h1>你的小花园，开花啦！</h1><p class="result-subtitle">认真完成 ${s.records.length} 道题，每一次尝试都值得一朵小花。</p><section class="result-stats" aria-label="本轮练习结果"><div><strong>${s.records.length}</strong><span>完成题数</span></div><div><strong>${stats.firstCorrect}<small> / ${s.records.length}</small></strong><span>首次答对</span></div><div><strong>${stats.retried}</strong><span>尝试了两次</span></div><div><strong>${stats.helped}</strong><span>看图学一学</span></div></section>
-  <section class="review-card"><h2>${stats.review.length ? '这些小种子，再照顾一下' : '每一朵小花都被你好好照顾了'}</h2><p>${stats.review.length ? '点开看图解，或者再练一轮这些题。' : '可以休息一下，也可以开启一轮新的练习。'}</p><div class="review-list">${stats.review.map(r => `<button data-action="review-help" data-index="${s.records.indexOf(r)}"><span>${r.question.a} ${r.question.op} ${r.question.b} = ${r.question.answer}</span><small>${r.firstAnswer !== r.question.answer ? '再练一练' : '用过图解'} ↗</small></button>`).join('')}</div></section><div class="result-actions"><button class="button secondary" data-action="home">回到首页</button><button class="button secondary" data-action="print-current">${icon('print')}打印本轮</button>${stats.review.length ? '<button class="button secondary" data-action="review">练练这些题</button>' : ''}<button class="button primary" data-action="again">再练一轮 ${icon('arrow')}</button></div><p class="privacy-note">本轮结果仅保存在这台设备上，多位小朋友可以轮流练习。</p></main>${footer()}`;
+  const stats = summary(session!);
+  return `${header()}<main class="results-main child-results"><div class="celebration" role="img" aria-label="小兔为你的努力庆祝">🐰 🎉</div><div class="result-bouquet">${icon('sprout')}${icon('flower')}${icon('flower')}${icon('sprout')}</div><h1>小花园，长大啦！</h1><p class="result-subtitle">${stats.solved ? '🌸 💧 ✨' : '🌱 ☀️ 💛'}</p><div class="child-result-actions"><button class="button primary picture-action" data-action="again" aria-label="再练一轮"><span aria-hidden="true">🔁</span><small>再玩</small></button>${stats.review.length ? '<button class="button secondary picture-action" data-action="review" aria-label="复习需要再练的题"><span aria-hidden="true">🐰</span><small>再数数</small></button>' : ''}<button class="button secondary picture-action" data-action="home" aria-label="回到首页"><span aria-hidden="true">🏠</span><small>回家</small></button></div><button class="text-button" data-action="parents">${icon('heart')}家长看记录</button></main>`;
+}
+function parentContent() {
+  const stats = session ? summary(session) : null;
+  return `<p class="eyebrow">给陪伴的大人</p><h2>让练习轻松一点</h2><ul class="parent-notes"><li>可以一直尝试，不会因答错自动显示答案。</li><li>🐰 打开动手提示，🔊 听题，⏭ 跳过。</li><li>提示不会填写答案，数数语音跟随孩子的点击。</li><li>右上角喇叭控制提示音与语音；系统语音不可用时仍可看图操作。</li></ul>${stats ? `<section class="parent-records"><h3>本轮记录 · ${session!.records.length} 题</h3><dl><div><dt>独立完成</dt><dd>${stats.independent}</dd></div><div><dt>借助提示完成</dt><dd>${stats.withHelp}</dd></div><div><dt>跳过</dt><dd>${stats.skipped}</dd></div><div><dt>首次答对</dt><dd>${stats.firstCorrect}</dd></div></dl><p>独立完成指未使用提示；重试后完成也计入。跳过不计为答对。</p>${session!.notice ? `<p>${session!.notice}</p>` : ''}<div class="review-list">${stats.review.map(r => `<div class="parent-review"><span>${r.question.a} ${r.question.op} ${r.question.b} = ${r.question.answer}</span><small>${r.status === 'skipped' ? '跳过' : r.helped ? '用过提示' : '重试'} · ${r.attempts} 次作答</small></div>`).join('')}</div><div class="dialog-actions"><button class="button secondary" data-action="print-current">${icon('print')}打印本轮与答案</button></div></section>` : ''}<p class="privacy-note">无需账号，练习记录仅保存在本浏览器。姓名只用于打印预览，不上传。</p><button class="button primary" data-close>知道了 ${icon('heart')}</button>`;
 }
 function paper(answers = false) {
   const w = worksheet!;
@@ -89,23 +96,40 @@ function showDialog(content: string, label: string, extraClass = '') {
   return dialog;
 }
 function explain(q: Question) {
-  const crossing = q.op === '+' ? q.a % 10 + q.b % 10 >= 10 : q.a % 10 < q.b % 10;
-  const dots = (count: number, extra = false, removed = 0) => `<div class="count-frames">${Array.from({length: Math.ceil(count / 10)}, (_, frame) => `<div class="ten-frame">${Array.from({length: 10}, (_, i) => { const n = frame * 10 + i; return `<span class="count-slot ${n >= count ? 'empty' : ''} ${extra ? 'added' : ''} ${n >= count - removed ? 'removed' : ''}">${n < count ? '●' : ''}</span>`; }).join('')}</div>`).join('') || '<span class="zero-count">0</span>'}</div>`;
-  let steps: string;
-  if (q.op === '+') {
-    const makeTen = 10 - q.a % 10;
-    steps = `<div class="visual-step"><span class="step-number">1</span><span>先有 ${q.a} 颗</span>${dots(q.a)}</div><div class="visual-step"><span class="step-number">2</span><span>再添 ${q.b} 颗</span>${dots(q.b, true)}</div><div class="explain-answer"><span class="step-number">3</span><strong>${q.a} + ${q.b} = ${q.answer}</strong><span>${crossing ? `先添 ${makeTen} 颗凑成 10，再添 ${q.b - makeTen} 颗。` : `合在一起，一共 ${q.answer} 颗。`}</span></div>`;
-  } else {
-    const toTen = q.a % 10;
-    steps = `<div class="visual-step"><span class="step-number">1</span><span>先有 ${q.a} 颗</span></div><div class="visual-step"><span class="step-number">2</span><span>划去 ${q.b} 颗，数数没划掉的</span>${dots(q.a, false, q.b)}</div><div class="explain-answer"><span class="step-number">3</span><strong>${q.a} − ${q.b} = ${q.answer}</strong><span>${crossing ? `先拿走 ${toTen} 颗剩 10，再拿走 ${q.b - toTen} 颗。` : `还剩下 ${q.answer} 颗。`}</span></div>`;
-  }
-  const dialog = showDialog(`<p class="eyebrow">一起数一数</p><h2>小种子会告诉你答案</h2><div class="explanation">${steps}</div><div class="dialog-actions"><button class="button secondary" data-replay>再看一次</button><button class="button primary" data-close>我知道啦 ${icon('check')}</button></div>`, '看图理解这道题', 'explain-dialog');
-  dialog.querySelector('[data-replay]')!.addEventListener('click', () => {
-    const visual = dialog.querySelector<HTMLElement>('.explanation')!;
-    visual.classList.remove('replaying'); void visual.offsetWidth; visual.classList.add('replaying');
+  const hint = createHint(q);
+  const dialog = showDialog('<div id="hint-content"></div>', '小兔帮忙，动手数一数', 'explain-dialog hands-on-dialog');
+  const empty = () => (q.op === '+' ? q.a + q.b : q.a - hint.removed.length) === 0;
+  const instruction = () => hintStage(hint) === 'count' && empty() ? '看看空篮子，想一想，再回去填答案。' : hintStage(hint) === 'combine' ? '把两篮草莓合在一起，再点一点，数一数。' : hintStage(hint) === 'remove' ? `先拿走${q.b}颗草莓。` : '点一点，数一数。想好了，再回去填答案。';
+  const draw = () => {
+    const stage = hintStage(hint);
+    const fruit = (index: number) => {
+      const removed = hint.removed.includes(index);
+      const order = hint.counted.indexOf(index) + 1;
+      return `<button class="hint-fruit ${removed ? 'taken' : ''} ${order ? 'counted' : ''} ${q.op === '+' && index >= q.a ? 'second-group' : ''}" data-fruit="${index}" ${removed || stage === 'combine' ? 'disabled' : ''} aria-label="${removed ? '已拿走的草莓' : stage === 'remove' ? '拿走一颗草莓' : order ? `第${order}颗草莓，再听一次` : '数一颗草莓'}"><span aria-hidden="true">🍓</span>${order ? `<small aria-hidden="true">${order}</small>` : ''}</button>`;
+    };
+    const tray = (start: number, count: number) => `<div class="fruit-tray">${Array.from({length:count},(_,i)=>fruit(start+i)).join('') || '<span class="empty-basket" role="img" aria-label="空篮子">🧺</span>'}</div>`;
+    const total = q.op === '+' ? q.a + q.b : q.a;
+    const frames = `<div class="fruit-frames">${Array.from({length:Math.ceil(total/10)},(_,f)=>`<div class="fruit-ten-frame">${Array.from({length:10},(_,i)=>f*10+i<total?fruit(f*10+i):'<span class="fruit-empty" aria-hidden="true"></span>').join('')}</div>`).join('') || '<span class="empty-basket" role="img" aria-label="空篮子">🧺</span>'}</div>`;
+    dialog.querySelector('#hint-content')!.innerHTML = `<div class="hint-bunny" aria-hidden="true">🐰</div><h2 class="hint-question">${q.a} ${q.op} ${q.b} = ?</h2><div class="hint-instruction" role="status"><span aria-hidden="true">${stage === 'combine' ? '🧺 ＋ 🧺' : stage === 'remove' ? `🍓 × ${q.b} ➜ 🧺` : empty() ? '🧺 👀' : '👆 🍓'}</span><p>${stage === 'combine' ? '合一合' : stage === 'remove' ? '拿走' : empty() ? '看一看' : '数一数'}</p><span class="sr-only">${instruction()}</span></div>${stage === 'combine' ? `<div class="two-trays">${tray(0,q.a)}<span class="tray-plus" aria-hidden="true">＋</span>${tray(q.a,q.b)}</div>` : frames}${q.op === '−' ? `<div class="taken-basket" aria-label="需要拿走${q.b}颗，已经拿走${hint.removed.length}颗"><span aria-hidden="true">🧺 ${hint.removed.length} / ${q.b}</span></div>` : ''}<div class="dialog-actions hint-actions"><button class="button secondary picture-action" data-hint-reset aria-label="重新数一遍"><span aria-hidden="true">↺</span><small>重来</small></button><button class="button secondary picture-action" data-hint-speak aria-label="听提示"><span aria-hidden="true">🔊</span><small>听一听</small></button>${stage === 'combine' ? '<button class="button primary picture-action" data-combine aria-label="把两篮草莓合在一起"><span aria-hidden="true">🧺 ➜</span><small>合一起</small></button>' : '<button class="button primary picture-action" data-close aria-label="回去自己填答案"><span aria-hidden="true">✏️ ➜</span><small>我来填</small></button>'}</div>`;
+  };
+  dialog.addEventListener('click', event => {
+    const target = (event.target as Element).closest<HTMLButtonElement>('button');
+    if (!target || target.disabled) return;
+    if (target.hasAttribute('data-combine')) { hint.combined = true; draw(); if (soundEnabled) speak(instruction()); }
+    if (target.hasAttribute('data-hint-reset')) { Object.assign(hint, createHint(q)); draw(); if (soundEnabled) speak(instruction()); }
+    if (target.hasAttribute('data-hint-speak') && soundEnabled) speak(instruction());
+    if (target.hasAttribute('data-fruit')) {
+      const stage = hintStage(hint);
+      const number = touchFruit(hint, Number(target.dataset.fruit));
+      if (number !== null) { draw(); (dialog.querySelector<HTMLButtonElement>(`[data-fruit="${target.dataset.fruit}"]:not(:disabled)`) || dialog.querySelector<HTMLButtonElement>('[data-fruit]:not(:disabled), [data-close].primary'))?.focus({ preventScroll: true }); if (soundEnabled) speak(stage === 'remove' ? `拿走${number}颗` : String(number)); }
+    }
   });
+  dialog.addEventListener('close', stopSpeech);
+  draw();
+  if (soundEnabled) speak(instruction());
 }
 function start(questions?: Question[], practiceSettings = settings, notice?: string) {
+  stopSpeech();
   const generated = questions ? { questions, notice: notice || '' } : generate(practiceSettings);
   session = createSession(practiceSettings, generated.questions, generated.notice);
   entry = ''; screen = 'quiz'; persist(); render(true);
@@ -116,8 +140,8 @@ function updateAnswer() {
   document.querySelector('.question-card')?.classList.remove('incorrect');
   const feedback = document.querySelector('.answer-feedback');
   if (feedback) {
-    feedback.className = 'answer-feedback answering';
-    feedback.textContent = entry ? '再输入一位数字，慢慢来。' : '输入答案，就会自动判断哦。';
+    feedback.className = 'answer-feedback child-feedback answering';
+    feedback.innerHTML = feedbackMarkup(false, false, !!entry);
   }
   const spoken = document.querySelector('#answer-spoken');
   if (spoken) spoken.textContent = entry ? `已输入${entry}，请继续输入` : '请作答';
@@ -125,9 +149,9 @@ function updateAnswer() {
 function checkAnswer() {
   if (!entry || !session || !submit(session, Number(entry))) return;
   const r = session.records[session.index];
-  if (soundEnabled) playFeedback(r.status === 'correct');
+  if (soundEnabled) { playFeedback(r.status === 'correct'); speak(r.status === 'correct' ? '真棒！' : '再试试。'); }
   persist(); render();
-  app.querySelector<HTMLButtonElement>(r.status === 'correct' || r.status === 'revealed' ? '[data-action="next"]' : '[data-action="key"], [data-action="choose"]')?.focus({ preventScroll: true });
+  app.querySelector<HTMLButtonElement>(r.status === 'correct' ? '[data-action="next"]' : '[data-action="key"], [data-action="choose"]')?.focus({ preventScroll: true });
 }
 function key(value: string) {
   if (!session || !['answering', 'retry'].includes(session.records[session.index].status)) return;
@@ -142,6 +166,8 @@ function key(value: string) {
   if (assessEntry(entry, r.question.answer) !== 'incomplete') checkAnswer();
 }
 function openPrint(current: boolean) {
+  app.querySelector<HTMLDialogElement>('dialog[open]')?.close();
+  stopSpeech();
   const s = current && session ? session.settings : settings;
   const generated = current && session ? { questions: session.records.map(r => r.question), notice: session.notice } : generate(s);
   worksheet = { ...generated, settings: { ...s }, date: new Intl.DateTimeFormat('zh-CN').format(new Date()), name: '' };
@@ -171,8 +197,8 @@ app.addEventListener('click', e => {
   const button = (e.target as Element).closest<HTMLButtonElement>('[data-action]');
   if (!button || button.disabled) return;
   const action = button.dataset.action;
-  if (action === 'sound') { soundEnabled = !soundEnabled; persist(); render(); if (soundEnabled) playFeedback(true); }
-  if (action === 'home' || action === 'pause') { screen = 'home'; persist(); render(true); }
+  if (action === 'sound') { soundEnabled = !soundEnabled; if (!soundEnabled) stopSpeech(); persist(); render(); if (soundEnabled) playFeedback(true); }
+  if (action === 'home' || action === 'pause') { stopSpeech(); screen = 'home'; persist(); render(true); }
   if (action === 'resume') { screen = 'quiz'; entry = ''; render(true); }
   if (action === 'start') {
     if (session && !session.completed) {
@@ -184,15 +210,16 @@ app.addEventListener('click', e => {
   if (action === 'review') start(summary(session!).review.map(r => r.question), session!.settings);
   if (action === 'key') key(button.dataset.value!);
   if (action === 'choose') { entry = button.dataset.value!; checkAnswer(); }
-  if (action === 'next') { next(session!); entry = ''; if (session!.completed) screen = 'results'; persist(); render(true); }
+  if (action === 'next') { stopSpeech(); next(session!); entry = ''; if (session!.completed) { screen = 'results'; if (soundEnabled) speak('小花园长大啦！'); } persist(); render(true); }
   if (action === 'help') { const r = session!.records[session!.index]; r.helped = true; persist(); explain(r.question); }
-  if (action === 'review-help') explain(session!.records[Number(button.dataset.index)].question);
+  if (action === 'skip') { stopSpeech(); skip(session!); entry = ''; if (session!.completed) { screen = 'results'; if (soundEnabled) speak('小花园长大啦！'); } persist(); render(true); }
+  if (action === 'read-question' && soundEnabled) { const q = session!.records[session!.index].question; speak(`${q.a}${q.op === '+' ? '加' : '减'}${q.b}等于多少？`); }
   if (action === 'print-new') openPrint(false);
   if (action === 'print-current') openPrint(true);
   if (action === 'print-back') { screen = printReturn; render(true); }
   if (action === 'regenerate' && worksheet) { const g = generate(worksheet.settings); worksheet.questions = g.questions; worksheet.notice = g.notice; render(); }
   if (action === 'print') { syncPrint(); window.print(); }
-  if (action === 'parents') showDialog(`<p class="eyebrow">陪伴，是最好的养分</p><h2>让练习轻松一点</h2><ul class="parent-notes"><li>从「小花苗」开始，觉得吃力就换「小种子」。</li><li>不计时，不比较。需要休息时随时回首页。</li><li>先让孩子数一数，再一起看看图解。</li><li>结果中的「首次答对」与重试、求助分别记录。</li><li>多位孩子轮流练习时，从首页开始新的一轮。</li></ul><p class="privacy-note">没有账号、广告和上传记录。进度仅保存在本浏览器；隐私模式或清除浏览器数据后可能丢失。</p><button class="button primary" data-close>一起慢慢长大 ${icon('sprout')}</button>`, '给陪伴的大人');
+  if (action === 'parents') showDialog(parentContent(), '家长区域', 'parent-dialog');
 });
 function syncPrint() {
   if (screen !== 'print' || !worksheet) {

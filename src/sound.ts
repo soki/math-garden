@@ -28,3 +28,20 @@ export function playFeedback(correct: boolean): void {
     else play();
   } catch { /* Sound availability must never interrupt a child's practice. */ }
 }
+
+export function stopSpeech(): void {
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+}
+export function speak(text: string): void {
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  try {
+    stopSpeech();
+    const message = new SpeechSynthesisUtterance(text);
+    message.lang = 'zh-CN';
+    message.rate = .8;
+    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('zh'));
+    const voice = voices.find(v => v.localService) || voices[0];
+    if (voice) message.voice = voice;
+    window.speechSynthesis.speak(message);
+  } catch { /* The picture tools remain usable without system speech. */ }
+}
