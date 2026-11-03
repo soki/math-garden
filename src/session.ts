@@ -4,6 +4,13 @@ export interface Session { settings: Settings; records: Record[]; index: number;
 export function createSession(settings: Settings, questions: Question[], notice = ''): Session {
   return { settings: { ...settings }, records: questions.map(question => ({ question, attempts: 0, firstAnswer: null, helped: false, status: 'answering', options: [] })), index: 0, completed: false, notice };
 }
+// Wait for a second digit when the child has entered a prefix of the answer.
+// There is no timeout: slower typing must not count as a wrong attempt.
+export function assessEntry(entry: string, answer: number): 'incomplete' | 'correct' | 'wrong' {
+  if (!entry) return 'incomplete';
+  if (entry === String(answer)) return 'correct';
+  return String(answer).startsWith(entry) ? 'incomplete' : 'wrong';
+}
 export function submit(session: Session, answer: number): boolean {
   const record = session.records[session.index];
   if (session.completed || !Number.isInteger(answer) || answer < 0 || record.status === 'correct' || record.status === 'revealed') return false;

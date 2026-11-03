@@ -61,3 +61,24 @@ test('local save survives JSON roundtrip and rejects malformed records', () => {
   const broken = JSON.parse(JSON.stringify(s)); broken.records[0].question.answer = 999; assert.equal(isSession(broken), false);
   assert.equal(isSettings({ ...DEFAULT_SETTINGS, count: 999 }), false);
 });
+
+test('automatic judging waits indefinitely for a second digit without recording a wrong attempt', async () => {
+  const { assessEntry } = await import('../src/session.ts');
+  const s = createSession(DEFAULT_SETTINGS, [{ a: 8, b: 4, op: '+', answer: 12 }]);
+  assert.equal(assessEntry('', 12), 'incomplete');
+  assert.equal(assessEntry('1', 12), 'incomplete');
+  assert.equal(s.records[0].attempts, 0);
+  assert.equal(assessEntry('12', 12), 'correct');
+  submit(s, 12); assert.equal(s.records[0].status, 'correct');
+  assert.equal(summary(s).firstCorrect, 1);
+  assert.equal(assessEntry('2', 20), 'incomplete');
+  assert.equal(assessEntry('20', 20), 'correct');
+});
+test('automatic judging accepts zero immediately and rejects wrong digits and wrong complete answers', async () => {
+  const { assessEntry } = await import('../src/session.ts');
+  assert.equal(assessEntry('0', 0), 'correct');
+  assert.equal(assessEntry('1', 1), 'correct');
+  assert.equal(assessEntry('3', 12), 'wrong');
+  assert.equal(assessEntry('11', 12), 'wrong');
+  assert.equal(assessEntry('0', 12), 'wrong');
+});

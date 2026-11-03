@@ -11,6 +11,8 @@ export function icon(name: string, cls = ''): string {
     back: '<path d="m27 12-12 12 12 12" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
     check: '<path d="m11 25 9 9 18-20" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
     help: '<circle cx="24" cy="24" r="17" stroke="currentColor" stroke-width="2.5"/><path d="M18 18c0-8 15-7 12 1-1 3-6 3-6 8m0 6v1" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
+    sound: '<path d="M8 19h8L28 9v30L16 29H8Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><path d="M34 17q7 7 0 14m5-20q12 13 0 26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
+    silent: '<path d="M8 19h8L28 9v30L16 29H8Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><path d="m35 19 10 10m0-10L35 29" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
     close: '<path d="m14 14 20 20m0-20L14 34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
   };
   return wrap(shapes[name] || shapes.flower, cls);

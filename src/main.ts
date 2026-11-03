@@ -1,13 +1,15 @@
 import './style.css';
+import { playFeedback } from './sound.ts';
 import { icon, gardenArt } from './art.ts';
 import { choices, DEFAULT_SETTINGS, generate, isSettings, LEVELS, type Question, type Settings } from './questions.ts';
-import { createSession, isSession, next, submit, summary, type Session } from './session.ts';
+import { createSession, isSession, next, submit, summary, assessEntry, type Session } from './session.ts';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let settings = { ...DEFAULT_SETTINGS };
 let session: Session | null = null;
 let screen: 'home' | 'quiz' | 'results' | 'print' = 'home';
 let entry = '';
+let soundEnabled = true;
 let worksheet: { questions: Question[]; settings: Settings; notice: string; date: string; name: string } | null = null;
 let includeAnswers = false;
 let storageUnavailable = false;
@@ -16,16 +18,17 @@ try {
   const saved = JSON.parse(localStorage.getItem('math-garden-v1') || 'null');
   if (isSettings(saved?.settings)) settings = saved.settings;
   if (isSession(saved?.session)) session = saved.session;
+  if (typeof saved?.soundEnabled === 'boolean') soundEnabled = saved.soundEnabled;
 } catch { /* A damaged or unavailable local save must not prevent practice. */ }
 function persist() {
-  try { localStorage.setItem('math-garden-v1', JSON.stringify({ settings, session })); }
+  try { localStorage.setItem('math-garden-v1', JSON.stringify({ settings, session, soundEnabled })); }
   catch { storageUnavailable = true; }
 }
 function level(s = settings) { return LEVELS.find(l => l.id === s.level)!; }
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 function operationLabel(s: Settings) { return s.operation === 'mixed' ? '加减混合' : s.operation === 'add' ? '加法练习' : '减法练习'; }
 function header() {
-  return `<header class="site-header"><button class="brand" data-action="home" aria-label="数学小花园首页">${icon('flower')}<span>数学小花园<small>MATH GARDEN</small></span></button><button class="parent-button" data-action="parents">${icon('heart')}<span>给陪伴的大人</span></button></header>`;
+  return `<header class="site-header"><button class="brand" data-action="home" aria-label="数学小花园首页">${icon('flower')}<span>数学小花园<small>MATH GARDEN</small></span></button><div class="header-actions"><button class="sound-button" data-action="sound" aria-label="${soundEnabled ? '关闭提示音' : '开启提示音'}" aria-pressed="${soundEnabled}" title="${soundEnabled ? '关闭提示音' : '开启提示音'}">${icon(soundEnabled ? 'sound' : 'silent')}</button><button class="parent-button" data-action="parents" aria-label="给陪伴的大人">${icon('heart')}<span>给陪伴的大人</span></button></div></header>`;
 }
 function footer() { return `<footer class="site-footer"><span>一颗小种子，一点小进步。</span><span>慢慢来，你会发现数学的美好 ${icon('sprout')}</span></footer>`; }
 function radio(name: string, value: string | number, text: string, checked: boolean) {
@@ -43,16 +46,17 @@ function home() {
 function quiz() {
   const s = session!; const r = s.records[s.index]; const q = r.question;
   const finished = r.status === 'correct' || r.status === 'revealed';
+  const wrong = r.status === 'revealed' || (r.status === 'retry' && (!entry || assessEntry(entry, q.answer) === 'wrong'));
   const max = level(s.settings).max;
   if (!r.options.length) { r.options = choices(q, max); persist(); }
   const blooms = s.records.slice(0, s.index).map(() => icon('flower')).join('');
   return `${header()}<main class="quiz-main"><div class="practice-top"><button class="text-button" data-action="pause">${icon('back')}休息一下</button><div class="practice-meta"><strong>${level(s.settings).name} · ${operationLabel(s.settings)}</strong><span>第 ${s.index + 1} / ${s.records.length} 题</span></div><button class="text-button" data-action="print-current">${icon('print')}打印本轮</button></div><div class="progress-track" role="progressbar" aria-label="练习进度" aria-valuemin="0" aria-valuemax="${s.records.length}" aria-valuenow="${s.index}"><span style="width:${s.index / s.records.length * 100}%"></span></div>
   ${s.notice ? `<p class="pool-notice">${s.notice}</p>` : ''}
-  <div class="quiz-layout"><section class="question-card" aria-labelledby="question-heading"><p class="eyebrow">${r.status === 'retry' ? '小花不着急，再想一想' : '给小花浇一滴水吧'}</p><h1 id="question-heading" class="sr-only">${q.a} ${q.op === '+' ? '加' : '减'} ${q.b} 等于多少</h1><div class="equation" aria-hidden="true"><span>${q.a}</span><span class="math-op">${q.op}</span><span>${q.b}</span><span class="math-op">=</span><output id="answer-display" class="answer-box ${finished ? 'settled' : ''}">${finished ? q.answer : entry || '?'}</output></div><p id="answer-spoken" class="sr-only" aria-live="polite">${entry ? `已输入${entry}` : '请作答'}</p>
-  <div class="answer-feedback ${r.status}" role="status">${r.status === 'correct' ? `${icon('check')} ${r.attempts === 1 ? '答对啦！小花又长大一点。' : '你找到答案啦！继续加油。'}` : r.status === 'retry' ? '差一点点，再数一数吧。你也可以点“帮帮我”。' : r.status === 'revealed' ? '一起看一看怎么数，下一题再试试。' : '慢慢想，准备好了再检查。'}</div>
+  <div class="quiz-layout"><section class="question-card ${wrong ? 'incorrect' : ''}" aria-labelledby="question-heading"><p class="eyebrow">${r.status === 'retry' ? '小花不着急，再想一想' : '给小花浇一滴水吧'}</p><h1 id="question-heading" class="sr-only">${q.a} ${q.op === '+' ? '加' : '减'} ${q.b} 等于多少</h1><div class="equation" aria-hidden="true"><span>${q.a}</span><span class="math-op">${q.op}</span><span>${q.b}</span><span class="math-op">=</span><output id="answer-display" class="answer-box ${finished ? 'settled' : ''} ${wrong && !finished ? 'incorrect' : ''}">${finished ? q.answer : entry || '?'}</output></div><p id="answer-spoken" class="sr-only" aria-live="polite">${finished ? `正确答案是${q.answer}` : entry ? `已输入${entry}` : '请作答'}</p>
+  <div class="answer-feedback ${r.status} ${wrong ? 'incorrect' : ''}" role="status">${r.status === 'correct' ? `${icon('check')} ${r.attempts === 1 ? '答对啦！小花又长大一点。' : '你找到答案啦！继续加油。'}` : r.status === 'retry' ? wrong ? '✕ 还不对哦，再试一次吧！' : '再输入一位数字，慢慢来。' : r.status === 'revealed' ? '✕ 这次还不对，看看正确答案，再试下一题。' : entry ? '再输入一位数字，慢慢来。' : '输入答案，就会自动判断哦。'}</div>
   <button class="help-button" data-action="help">${icon('help')}帮帮我 · 看图数一数</button><div class="little-garden" aria-label="已完成的小花">${blooms || `<span>${icon('seed')} 你的第一朵小花，马上就要发芽啦</span>`}</div></section>
-  <section class="input-card" aria-label="作答区域"><p class="input-title">${finished ? '每一次尝试，都很棒' : s.settings.input === 'keypad' ? '点数字，填答案' : '选一个答案吧'}</p>${finished ? `<div class="reward-flower">${icon(r.status === 'correct' ? 'flower' : 'sprout')}<p>${r.status === 'correct' ? '收到一滴成长的水！' : '学会新方法，也是一种成长。'}</p></div>` : s.settings.input === 'keypad' ? `<div class="keypad">${[1,2,3,4,5,6,7,8,9,'clear',0,'delete'].map(n => `<button data-action="key" data-value="${n}" class="key ${typeof n === 'string' ? 'utility-key' : ''}" aria-label="${n === 'clear' ? '清空答案' : n === 'delete' ? '删除一位' : n}">${n === 'clear' ? '清空' : n === 'delete' ? '⌫' : n}</button>`).join('')}</div>` : `<div class="answer-choices">${r.options.map((n, i) => `<button class="choice ${entry === String(n) ? 'chosen' : ''}" data-action="choose" data-value="${n}" aria-pressed="${entry === String(n)}"><small>${i + 1}</small>${n}<span>${entry === String(n) ? '✓' : ''}</span></button>`).join('')}</div>`}
-  <button class="button primary check-button" data-action="${finished ? 'next' : 'submit'}" ${!finished && !entry ? 'disabled' : ''}>${finished ? s.index === s.records.length - 1 ? '看看我的小花园' : '下一题' : '检查答案'} ${icon(finished ? 'arrow' : 'check')}</button><p class="keyboard-note">${finished ? '准备好了再继续，不用着急' : s.settings.input === 'keypad' ? '也可以用键盘数字输入，Enter 检查' : '选好后，点「检查答案」'}</p></section></div></main>${footer()}`;
+  <section class="input-card" aria-label="作答区域"><p class="input-title">${finished ? '每一次尝试，都很棒' : s.settings.input === 'keypad' ? '点数字，填答案' : '选一个答案吧'}</p>${finished ? `<div class="reward-flower">${icon(r.status === 'correct' ? 'flower' : 'sprout')}<p>${r.status === 'correct' ? '收到一滴成长的水！' : '学会新方法，也是一种成长。'}</p></div>` : s.settings.input === 'keypad' ? `<div class="keypad">${[1,2,3,4,5,6,7,8,9,'clear',0,'delete'].map(n => `<button data-action="key" data-value="${n}" class="key ${typeof n === 'string' ? 'utility-key' : ''}" aria-label="${n === 'clear' ? '清空答案' : n === 'delete' ? '删除一位' : n}">${n === 'clear' ? '清空' : n === 'delete' ? '⌫' : n}</button>`).join('')}</div>` : `<div class="answer-choices">${r.options.map((n, i) => `<button class="choice ${entry === String(n) ? wrong ? 'wrong-choice' : 'chosen' : ''}" data-action="choose" data-value="${n}" aria-pressed="${entry === String(n)}"><small>${i + 1}</small>${n}<span>${entry === String(n) ? wrong ? '✕' : '✓' : ''}</span></button>`).join('')}</div>`}
+  ${finished ? `<button class="button primary check-button" data-action="next">${s.index === s.records.length - 1 ? '看看我的小花园' : '下一题'} ${icon('arrow')}</button>` : ''}<p class="keyboard-note">${finished ? '准备好了再继续，不用着急' : s.settings.input === 'keypad' ? '自动判断 · 也可以用键盘数字输入' : '点选答案，就会自动判断哦'}</p></section></div></main>${footer()}`;
 }
 function results() {
   const s = session!; const stats = summary(s);
@@ -107,19 +111,35 @@ function start(questions?: Question[], practiceSettings = settings, notice?: str
   entry = ''; screen = 'quiz'; persist(); render(true);
 }
 function updateAnswer() {
-  const output = document.querySelector('#answer-display'); if (output) output.textContent = entry || '?';
-  const spoken = document.querySelector('#answer-spoken'); if (spoken) spoken.textContent = entry ? `已输入${entry}` : '请作答';
-  const check = document.querySelector<HTMLButtonElement>('[data-action="submit"]'); if (check) check.disabled = entry === '';
-  document.querySelectorAll<HTMLButtonElement>('[data-action="choose"]').forEach(button => {
-    const selected = button.dataset.value === entry; button.classList.toggle('chosen', selected); button.setAttribute('aria-pressed', String(selected)); button.querySelector('span')!.textContent = selected ? '✓' : '';
-  });
+  const output = document.querySelector('#answer-display');
+  if (output) { output.textContent = entry || '?'; output.classList.remove('incorrect'); }
+  document.querySelector('.question-card')?.classList.remove('incorrect');
+  const feedback = document.querySelector('.answer-feedback');
+  if (feedback) {
+    feedback.className = 'answer-feedback answering';
+    feedback.textContent = entry ? '再输入一位数字，慢慢来。' : '输入答案，就会自动判断哦。';
+  }
+  const spoken = document.querySelector('#answer-spoken');
+  if (spoken) spoken.textContent = entry ? `已输入${entry}，请继续输入` : '请作答';
+}
+function checkAnswer() {
+  if (!entry || !session || !submit(session, Number(entry))) return;
+  const r = session.records[session.index];
+  if (soundEnabled) playFeedback(r.status === 'correct');
+  persist(); render();
+  app.querySelector<HTMLButtonElement>(r.status === 'correct' || r.status === 'revealed' ? '[data-action="next"]' : '[data-action="key"], [data-action="choose"]')?.focus({ preventScroll: true });
 }
 function key(value: string) {
   if (!session || !['answering', 'retry'].includes(session.records[session.index].status)) return;
+  const r = session.records[session.index];
+  // A new digit replaces a rejected attempt; keep the wrong answer visible until then.
+  if (/^\d$/.test(value) && r.status === 'retry' && assessEntry(entry, r.question.answer) === 'wrong') entry = '';
   if (value === 'delete') entry = entry.slice(0, -1);
   else if (value === 'clear') entry = '';
   else if (/^\d$/.test(value) && entry.length < 2) entry = entry === '0' ? value : entry + value;
+  else return;
   updateAnswer();
+  if (assessEntry(entry, r.question.answer) !== 'incomplete') checkAnswer();
 }
 function openPrint(current: boolean) {
   const s = current && session ? session.settings : settings;
@@ -151,6 +171,7 @@ app.addEventListener('click', e => {
   const button = (e.target as Element).closest<HTMLButtonElement>('[data-action]');
   if (!button || button.disabled) return;
   const action = button.dataset.action;
+  if (action === 'sound') { soundEnabled = !soundEnabled; persist(); render(); if (soundEnabled) playFeedback(true); }
   if (action === 'home' || action === 'pause') { screen = 'home'; persist(); render(true); }
   if (action === 'resume') { screen = 'quiz'; entry = ''; render(true); }
   if (action === 'start') {
@@ -162,13 +183,7 @@ app.addEventListener('click', e => {
   if (action === 'again') start(undefined, session!.settings);
   if (action === 'review') start(summary(session!).review.map(r => r.question), session!.settings);
   if (action === 'key') key(button.dataset.value!);
-  if (action === 'choose') { entry = button.dataset.value!; updateAnswer(); }
-  if (action === 'submit' && entry !== '' && session && submit(session, Number(entry))) {
-    entry = ''; persist(); render();
-    const r = session.records[session.index];
-    if (r.status === 'revealed') { r.helped = true; persist(); explain(r.question); }
-    else app.querySelector<HTMLButtonElement>(r.status === 'correct' ? '[data-action="next"]' : '[data-action="key"] , [data-action="choose"]')?.focus({ preventScroll: true });
-  }
+  if (action === 'choose') { entry = button.dataset.value!; checkAnswer(); }
   if (action === 'next') { next(session!); entry = ''; if (session!.completed) screen = 'results'; persist(); render(true); }
   if (action === 'help') { const r = session!.records[session!.index]; r.helped = true; persist(); explain(r.question); }
   if (action === 'review-help') explain(session!.records[Number(button.dataset.index)].question);
@@ -193,12 +208,12 @@ document.addEventListener('keydown', e => {
   if (screen !== 'quiz' || document.querySelector('dialog[open]') || e.ctrlKey || e.metaKey || e.altKey) return;
   if ((e.target as HTMLElement).matches('input,textarea,select')) return;
   if (session!.settings.input === 'keypad' && (/^\d$/.test(e.key) || e.key === 'Backspace' || e.key === 'Delete')) {
-    e.preventDefault(); key(e.key === 'Backspace' ? 'delete' : e.key === 'Delete' ? 'clear' : e.key);
+    e.preventDefault(); if (e.repeat) return; key(e.key === 'Backspace' ? 'delete' : e.key === 'Delete' ? 'clear' : e.key);
   }
   const focusedButton = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
-  const answerControl = focusedButton?.matches('[data-action="key"], [data-action="choose"], [data-action="submit"], [data-action="next"]');
+  const answerControl = focusedButton?.matches('[data-action="key"], [data-action="choose"], [data-action="next"]');
   if (e.key === 'Enter' && (!focusedButton || answerControl)) {
-    e.preventDefault(); if (!e.repeat) app.querySelector<HTMLButtonElement>('[data-action="next"], [data-action="submit"]')?.click();
+    e.preventDefault(); if (!e.repeat) app.querySelector<HTMLButtonElement>('[data-action="next"]')?.click();
   }
 });
 render();
